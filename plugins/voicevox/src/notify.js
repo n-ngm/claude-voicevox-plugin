@@ -94,19 +94,13 @@ function extractLastAssistantMessage(transcriptPath) {
   return [null, null];
 }
 
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
 async function processHookMessage(hookEvent, message, lastAssistantMessage, transcriptPath, notifications) {
   if (hookEvent === "Stop") {
-    const lastFirstLine = lastAssistantMessage?.split("\n")[0] ?? null;
-    let transcriptMsg = null;
-    for (let i = 0; i < 10; i++) {
-      await sleep(300);
-      [transcriptMsg] = extractLastAssistantMessage(transcriptPath);
-      if (transcriptMsg && transcriptMsg !== lastFirstLine) break;
-    }
-    const msg = (transcriptMsg || lastAssistantMessage)?.split("\n")[0];
-    return msg ?? notifications.task_complete ?? "タスク完了";
+    // last_assistant_message is always the latest; the transcript may not be flushed yet
+    const latest = lastAssistantMessage?.trim();
+    if (latest) return removeSpeakerIdLine(latest).split("\n")[0];
+    const [transcriptMsg] = extractLastAssistantMessage(transcriptPath);
+    return transcriptMsg ?? notifications.task_complete ?? "タスク完了";
   }
 
   if (hookEvent === "Notification") {
@@ -197,8 +191,10 @@ process.stdin.on("end", async () => {
 
   const text = await processHookMessage(hookEvent, message, lastAssistantMessage, transcriptPath, notifications);
 
-  // Extract speaker_id after processHookMessage so Stop events have the latest transcript
-  const [, transcriptSpeakerId] = extractLastAssistantMessage(transcriptPath);
+  // Stop events carry the latest message; other events fall back to the transcript
+  const [, transcriptSpeakerId] = hookEvent === "Stop" && lastAssistantMessage
+    ? [null, extractSpeakerIdFromText(lastAssistantMessage)]
+    : extractLastAssistantMessage(transcriptPath);
   if (transcriptSpeakerId !== null) speakerId = transcriptSpeakerId;
 
   const title = extractSessionTitle(transcriptPath);

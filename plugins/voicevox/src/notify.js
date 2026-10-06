@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, unlinkSync, existsSync, appendFileSync } from "fs";
+import { readFileSync, writeFileSync, unlinkSync, existsSync, appendFileSync, statSync } from "fs";
 import { homedir, tmpdir, platform } from "os";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -130,6 +130,25 @@ async function waitForPendingToolName(transcriptPath) {
   return null;
 }
 
+// Parallel tool calls fire several permission notifications at once; speak only the first
+const PERMISSION_DEBOUNCE_MS = 2000;
+
+function acquirePermissionNotifyLock(sessionId) {
+  const lockFile = join(tmpdir(), `voicevox-permission.${sessionId || "default"}.lock`);
+  try {
+    writeFileSync(lockFile, "", { flag: "wx" });
+    return true;
+  } catch {}
+  try {
+    if (Date.now() - statSync(lockFile).mtimeMs < PERMISSION_DEBOUNCE_MS) return false;
+    unlinkSync(lockFile);
+    writeFileSync(lockFile, "", { flag: "wx" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function processHookMessage(hookEvent, message, lastAssistantMessage, transcriptPath, notifications) {
   if (hookEvent === "Stop") {
     // last_assistant_message is always the latest; the transcript may not be flushed yet
@@ -220,7 +239,10 @@ process.stdin.on("end", async () => {
 
   try { appendFileSync("/tmp/voicevox-debug.log", JSON.stringify(input) + "\n"); } catch {}
 
-  const { hook_event_name: hookEvent = "", message, last_assistant_message: lastAssistantMessage, transcript_path: transcriptPath, cwd } = input;
+  const { hook_event_name: hookEvent = "", message, last_assistant_message: lastAssistantMessage, transcript_path: transcriptPath, cwd, session_id: sessionId } = input;
+
+  if (hookEvent === "Notification" && message?.startsWith("Claude needs your permission")
+      && !acquirePermissionNotifyLock(sessionId)) process.exit(0);
 
   const speakerName = resolveCurrentSpeaker(cwd);
   const config = loadSpeakerConfig(speakerName);

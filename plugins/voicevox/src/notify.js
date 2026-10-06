@@ -94,25 +94,58 @@ function extractLastAssistantMessage(transcriptPath) {
   return [null, null];
 }
 
+// Find the latest tool_use that has no tool_result yet (the one awaiting permission)
+function extractPendingToolName(transcriptPath) {
+  if (!transcriptPath || !existsSync(transcriptPath)) return null;
+  try {
+    const lines = readFileSync(transcriptPath, "utf8").split("\n").filter(Boolean).reverse();
+    const resolved = new Set();
+    for (const line of lines) {
+      try {
+        const data = JSON.parse(line);
+        const blocks = data.message?.content;
+        if (!Array.isArray(blocks)) continue;
+        for (const block of [...blocks].reverse()) {
+          if (block.type === "tool_result") resolved.add(block.tool_use_id);
+          if (block.type === "tool_use" && !resolved.has(block.id)) {
+            // mcp__server__tool -> tool
+            return block.name?.split("__").pop() || null;
+          }
+        }
+      } catch {}
+    }
+  } catch {}
+  return null;
+}
+
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function waitForPendingToolName(transcriptPath) {
+  // The tool_use may take a moment to be flushed to the transcript
+  for (let i = 0; i < 10; i++) {
+    const tool = extractPendingToolName(transcriptPath);
+    if (tool) return tool;
+    await sleep(200);
+  }
+  return null;
+}
 
 async function processHookMessage(hookEvent, message, lastAssistantMessage, transcriptPath, notifications) {
   if (hookEvent === "Stop") {
-    const lastFirstLine = lastAssistantMessage?.split("\n")[0] ?? null;
-    let transcriptMsg = null;
-    for (let i = 0; i < 10; i++) {
-      await sleep(300);
-      [transcriptMsg] = extractLastAssistantMessage(transcriptPath);
-      if (transcriptMsg && transcriptMsg !== lastFirstLine) break;
-    }
-    const msg = (transcriptMsg || lastAssistantMessage)?.split("\n")[0];
-    return msg ?? notifications.task_complete ?? "タスク完了";
+    // last_assistant_message is always the latest; the transcript may not be flushed yet
+    const latest = lastAssistantMessage?.trim();
+    if (latest) return removeSpeakerIdLine(latest).split("\n")[0];
+    const [transcriptMsg] = extractLastAssistantMessage(transcriptPath);
+    return transcriptMsg ?? notifications.task_complete ?? "タスク完了";
   }
 
   if (hookEvent === "Notification") {
     if (!message) return notifications.permission_needed ?? "許可が必要";
-    if (message.startsWith("Claude needs your permission to use")) {
-      const tool = message.replace(/^Claude needs your permission to use\s*/, "").replace(/\.$/, "");
+    if (message.startsWith("Claude needs your permission")) {
+      // Newer versions omit the tool name, so fall back to the pending tool_use in the transcript
+      const tool = message.match(/^Claude needs your permission to use\s+(.+?)\.?$/)?.[1]
+        ?? await waitForPendingToolName(transcriptPath);
+      if (!tool) return notifications.permission_needed ?? "許可が必要";
       return (notifications.tool_permission ?? "{tool}の許可が必要").replace("{tool}", tool);
     }
     if (message.startsWith("Claude is waiting")) process.exit(0);
@@ -197,8 +230,10 @@ process.stdin.on("end", async () => {
 
   const text = await processHookMessage(hookEvent, message, lastAssistantMessage, transcriptPath, notifications);
 
-  // Extract speaker_id after processHookMessage so Stop events have the latest transcript
-  const [, transcriptSpeakerId] = extractLastAssistantMessage(transcriptPath);
+  // Stop events carry the latest message; other events fall back to the transcript
+  const [, transcriptSpeakerId] = hookEvent === "Stop" && lastAssistantMessage
+    ? [null, extractSpeakerIdFromText(lastAssistantMessage)]
+    : extractLastAssistantMessage(transcriptPath);
   if (transcriptSpeakerId !== null) speakerId = transcriptSpeakerId;
 
   const title = extractSessionTitle(transcriptPath);

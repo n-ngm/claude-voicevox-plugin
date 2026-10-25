@@ -1,8 +1,11 @@
 {
   "mcpServers": {
     "voicevox": {
-      "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/src/mcp_server.js"]
+      "command": "sh",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/bin/node.sh",
+        "${CLAUDE_PLUGIN_ROOT}/src/mcp_server.js"
+      ]
     }
   }
 }

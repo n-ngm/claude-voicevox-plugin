@@ -109,6 +109,15 @@ pkill -f mcp_server
 
 Restart Claude Code to relaunch the MCP server.
 
+**MCP server or notifications fail depending on the project directory**
+
+The MCP server and hooks are launched via `bin/node.sh`, which picks a Node.js 18+ binary even if the project pins an older version (nvm / mise / volta etc.).
+If no suitable binary is found automatically, set `VOICEVOX_NODE` to its path before starting Claude Code:
+
+```bash
+export VOICEVOX_NODE=/path/to/node
+```
+
 ## License
 
 MIT — see [LICENSE](LICENSE)

@@ -41,4 +41,26 @@ if [ -z "$NODE_BIN" ]; then
   exit 1
 fi
 
+# --install-deps: run `npm install` first if dependencies are missing
+# (each plugin update creates a new version directory without node_modules).
+# npm output goes to stderr so it does not break the MCP stdio protocol.
+if [ "$1" = "--install-deps" ]; then
+  shift
+  PLUGIN_ROOT=$(cd "$(dirname "$0")/.." && pwd)
+  if [ ! -d "$PLUGIN_ROOT/node_modules/@modelcontextprotocol/sdk" ]; then
+    NPM_BIN="$(dirname "$NODE_BIN")/npm"
+    [ -x "$NPM_BIN" ] || NPM_BIN=$(command -v npm)
+    LOCK_DIR="$PLUGIN_ROOT/.npm-install.lock"
+    if mkdir "$LOCK_DIR" 2>/dev/null; then
+      echo "voicevox: installing dependencies in $PLUGIN_ROOT" >&2
+      PATH="$(dirname "$NODE_BIN"):$PATH" "$NPM_BIN" install --prefix "$PLUGIN_ROOT" --omit=dev --no-audit --no-fund >&2
+      rmdir "$LOCK_DIR"
+    else
+      # Another process is installing; wait for it to finish (up to 120s)
+      i=0
+      while [ -d "$LOCK_DIR" ] && [ "$i" -lt 120 ]; do sleep 1; i=$((i + 1)); done
+    fi
+  fi
+fi
+
 exec "$NODE_BIN" "$@"

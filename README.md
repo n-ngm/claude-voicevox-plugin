@@ -47,6 +47,7 @@ claude plugin update voicevox@claude-voicevox-plugin
 ```
 
 Then restart Claude Code and run `/voicevox:setup` again to refresh the symlink.
+npm dependencies are installed automatically when the MCP server starts for the first time after an update.
 
 ## Character Configuration
 

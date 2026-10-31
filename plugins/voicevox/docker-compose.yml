@@ -5,8 +5,14 @@ services:
     ports:
       - "127.0.0.1:50021:50021"
     restart: always
+    volumes:
+      - voicevox-data:/home/user
     networks:
       - voicevox
+
+volumes:
+  voicevox-data:
+    name: voicevox-data
 
 networks:
   voicevox:

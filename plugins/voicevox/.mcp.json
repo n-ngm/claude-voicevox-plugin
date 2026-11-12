@@ -4,6 +4,7 @@
       "command": "sh",
       "args": [
         "${CLAUDE_PLUGIN_ROOT}/bin/node.sh",
+        "--install-deps",
         "${CLAUDE_PLUGIN_ROOT}/src/mcp_server.js"
       ]
     }

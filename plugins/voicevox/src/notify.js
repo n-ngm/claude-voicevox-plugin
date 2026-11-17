@@ -4,6 +4,7 @@ import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { spawnSync } from "child_process";
 import { randomUUID } from "crypto";
+import { play } from "./play.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const VOICEVOX_HOST = "http://localhost:50021";
@@ -203,16 +204,7 @@ async function synthesizeAndPlay(text, speakerId, speed) {
 
     writeFileSync(tmpFile, Buffer.from(await synthResp.arrayBuffer()));
 
-    if (platform() === "darwin") {
-      spawnSync("afplay", [tmpFile], { stdio: "ignore" });
-    } else {
-      for (const args of [["paplay", tmpFile], ["aplay", tmpFile], ["mpv", "--no-video", tmpFile]]) {
-        if (spawnSync("which", [args[0]], { stdio: "ignore" }).status === 0) {
-          spawnSync(args[0], args.slice(1), { stdio: "ignore" });
-          break;
-        }
-      }
-    }
+    await play(tmpFile);
   } catch (e) {
     const msg = e?.cause?.code === "ECONNREFUSED" ? "Cannot connect to VOICEVOX" : e.message;
     process.stderr.write(`${msg}\n`);

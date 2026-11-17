@@ -1,11 +1,11 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { spawnSync } from "child_process";
 import { writeFileSync, unlinkSync, existsSync } from "fs";
-import { tmpdir, platform } from "os";
+import { tmpdir } from "os";
 import { join } from "path";
 import { randomUUID } from "crypto";
+import { play, withPlayLock, playFile } from "./play.js";
 
 const VOICEVOX_HOST = "http://localhost:50021";
 
@@ -80,19 +80,6 @@ const TOOLS = [
   }
 ];
 
-function play(filepath) {
-  if (platform() === "darwin") {
-    spawnSync("afplay", [filepath], { stdio: "ignore" });
-  } else {
-    for (const args of [["paplay", filepath], ["aplay", filepath], ["mpv", "--no-video", filepath]]) {
-      if (spawnSync("which", [args[0]], { stdio: "ignore" }).status === 0) {
-        spawnSync(args[0], args.slice(1), { stdio: "ignore" });
-        break;
-      }
-    }
-  }
-}
-
 async function synthesize(text, speakerId, speed) {
   const queryResp = await fetch(
     `${VOICEVOX_HOST}/audio_query?text=${encodeURIComponent(text)}&speaker=${speakerId}`,
@@ -142,7 +129,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const wav = await synthesize(t, speaker_id, speed);
       if (typeof wav === "string") return text(`Error: ${wav}`);
       writeFileSync(tmpFile, wav);
-      if (auto_play) play(tmpFile);
+      if (auto_play) await play(tmpFile);
       return text("ok");
     } catch (e) {
       return text(isConnRefused(e) ? "Error: Cannot connect to VOICEVOX Engine" : `Error: ${e.message}`);
@@ -157,7 +144,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     const errors = [];
     const tmpFiles = [];
-    try {
+    const run = async () => {
       let wav = await synthesize(texts[0], speaker_id, speed);
       for (let i = 0; i < texts.length; i++) {
         let tmpFile = null;
@@ -170,9 +157,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
 
         const nextPromise = i + 1 < texts.length ? synthesize(texts[i + 1], speaker_id, speed) : null;
-        if (auto_play && tmpFile) play(tmpFile);
+        if (auto_play && tmpFile) playFile(tmpFile);
         if (nextPromise) wav = await nextPromise;
       }
+    };
+    try {
+      // Hold the lock for the whole batch so other audio cannot cut in between sentences
+      await (auto_play ? withPlayLock(run) : run());
       return text(errors.length > 0 ? `partial errors: ${errors.join("; ")}` : "ok");
     } finally {
       for (const f of tmpFiles) if (existsSync(f)) unlinkSync(f);
@@ -214,7 +205,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       writeFileSync(tmpFile, Buffer.from(await synthResp.arrayBuffer()));
-      if (auto_play) play(tmpFile);
+      if (auto_play) await play(tmpFile);
       return text("ok");
     } catch (e) {
       return text(isConnRefused(e) ? "Error: Cannot connect to VOICEVOX Engine" : `Error: ${e.message}`);
